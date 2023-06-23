@@ -42,11 +42,15 @@
           "dependencies": {
             "Microsoft.ML": {
               "target": "Package",
-              "version": "[2.0.1, )"
+              "version": "[3.0.0-preview.23266.6, )"
             },
             "Newtonsoft.Json": {
               "target": "Package",
               "version": "[13.0.3, )"
+            },
+            "Spectre.Console": {
+              "target": "Package",
+              "version": "[0.47.1-preview.0.8, )"
             },
             "System.Reactive": {
               "target": "Package",

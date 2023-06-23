@@ -34,3 +34,5 @@ C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\runtimes\osx-arm64\n
 C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\runtimes\osx-x64\native\libLdaNative.dylib
 C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\runtimes\win-x64\native\LdaNative.dll
 C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\runtimes\win-x86\native\LdaNative.dll
+C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\yelp_labelled.txt
+C:\Users\Mirko\source\repos\Yelp restorani\bin\Debug\net7.0\Spectre.Console.dll
