@@ -67,6 +67,58 @@ namespace Yelp_restorani
         }
         public async void GetBusinesses(string location)
         {
+            // ML model training
+            var ctx = new MLContext();
+
+            // load data
+            var dataView = ctx.Data
+                .LoadFromTextFile<SentimentData>("yelp_labelled.txt");
+
+            // split data into testing set
+            var splitDataView = ctx.Data
+                .TrainTestSplit(dataView, testFraction: 0.2);
+
+            // Build model
+            var estimator = ctx.Transforms.Text
+                .FeaturizeText(
+                    outputColumnName: "Features",
+                    inputColumnName: nameof(SentimentData.Text)
+                ).Append(ctx.BinaryClassification.Trainers.SdcaLogisticRegression(featureColumnName: "Features"));
+
+            // Train model
+            ITransformer model = default!;
+
+            var rule = new Rule("Create and Train Model");
+            Console
+                .Live(rule)
+                .Start(console =>
+                {
+                    // training happens here
+                    model = estimator.Fit(splitDataView.TrainSet);
+                    var predictions = model.Transform(splitDataView.TestSet);
+
+                    rule.Title = "🏁 Training Complete, Evaluating Accuracy.";
+                    console.Refresh();
+
+                    // evaluate the accuracy of our model
+                    var metrics = ctx.BinaryClassification.Evaluate(predictions);
+
+                    var table = new Table()
+                        .MinimalBorder()
+                        .Title("💯 Model Accuracy");
+                    table.AddColumns("Accuracy", "Auc", "F1Score");
+                    table.AddRow($"{metrics.Accuracy:P2}", $"{metrics.AreaUnderRocCurve:P2}", $"{metrics.F1Score:P2}");
+
+                    console.UpdateTarget(table);
+                    console.Refresh();
+                });
+
+            // save to disk
+            ctx.Model.Save(model, dataView.Schema, "model.zip");
+
+            // load from disk
+            ctx.Model.Load("model.zip", out var schema);
+
             string apiKey = "wIiAX8kQc7QKCa0sUC0h-SaSnw-TqCHfu3dVQiG4tVvLzlGcloY5bPb_X5KZ98_2KLAB9gRcw1rlUVCFMrGo8u2CQc6sX3Iu6Vv0TYUZaIVZueVQPu3qVSISl_GOZHYx"; 
             string apiUrl = $"https://api.yelp.com/v3/businesses/search?location={location}&categories=restaurants";
             using HttpClient client = new HttpClient();
@@ -90,114 +142,22 @@ namespace Yelp_restorani
                 JObject reviewJsonResponse = JObject.Parse(reviewContent);
                 JArray reviews = (JArray)reviewJsonResponse["reviews"];
 
-                // int totalReviews = 0;
-                // int positiveReviews = 0;
-                // int negativeReviews = 0;
-
                 foreach (JObject review in reviews)
                 {
                     string userName = review["user"]["name"].ToString();
                     string userReview = review["text"].ToString();
 
-                    // ML training
+                    var engine = ctx.Model.CreatePredictionEngine<SentimentData, SentimentPrediction>(model);
 
-                    var ctx = new MLContext();
+                    var input = new SentimentData { Text = userReview };
+                    var result = engine.Predict(input);
+                    var style = result.Prediction ? (color: "green", emoji: "👍") : (color: "red", emoji: "👎");
 
-                    // load data
-                    var dataView = ctx.Data
-                        .LoadFromTextFile<SentimentData>("yelp_labelled.txt");
-
-                    // split data into testing set
-                    var splitDataView = ctx.Data
-                        .TrainTestSplit(dataView, testFraction: 0.2);
-
-                    // Build model
-                    var estimator = ctx.Transforms.Text
-                        .FeaturizeText(
-                            outputColumnName: "Features",
-                            inputColumnName: nameof(SentimentData.Text)
-                        ).Append(ctx.BinaryClassification.Trainers.SdcaLogisticRegression(featureColumnName: "Features"));
-
-                    // Train model
-                    ITransformer model = default!;
-
-                    var rule = new Rule("Create and Train Model");
-                    Console
-                        .Live(rule)
-                        .Start(console =>
-                        {
-                            // training happens here
-                            model = estimator.Fit(splitDataView.TrainSet);
-                            var predictions = model.Transform(splitDataView.TestSet);
-
-                            rule.Title = "🏁 Training Complete, Evaluating Accuracy.";
-                            console.Refresh();
-
-                            // evaluate the accuracy of our model
-                            var metrics = ctx.BinaryClassification.Evaluate(predictions);
-
-                            var table = new Table()
-                                .MinimalBorder()
-                                .Title("💯 Model Accuracy");
-                            table.AddColumns("Accuracy", "Auc", "F1Score");
-                            table.AddRow($"{metrics.Accuracy:P2}", $"{metrics.AreaUnderRocCurve:P2}", $"{metrics.F1Score:P2}");
-
-                            console.UpdateTarget(table);
-                            console.Refresh();
-                        });
-
-                    // ?
-                    while (true)
-                    {
-                        var text = AnsiConsole.Ask<string>("What's your [green]review text[/]?");
-                        var engine = ctx.Model.CreatePredictionEngine<SentimentData, SentimentPrediction>(model);
-
-                        var input = new SentimentData { Text = text };
-                        var result = engine.Predict(input);
-                        var style = result.Prediction
-                            ? (color: "green", emoji: "👍")
-                            : (color: "red", emoji: "👎");
-
-                        Console.MarkupLine($"{style.emoji} [{style.color}]\"{text}\" ({result.Probability:P00})[/] ");
-                    }
-
-                    // save to disk
-                    ctx.Model.Save(model, dataView.Schema, "model.zip");
-
-
-                    // load from disk
-                    ctx.Model.Load("model.zip", out var schema);
-
-                    /*
-                    var mlContext = new MLContext();
-                    var modelPath = "./";
-                    var model = mlContext.Model.Load(modelPath, out var modelSchema);
-
-                    var predictionEngine = mlContext.Model.CreatePredictionEngine<SentimentData, SentimentPrediction>(model);
-
-                    var sentimentData = new SentimentData { SentimentText = userReview };
-                    var sentimentPrediction = predictionEngine.Predict(sentimentData);
-                    
-                    if (sentimentPrediction.Prediction)
-                    {
-                        positiveReviews++;
-                    }
-                    else
-                    {
-                        negativeReviews++;
-                    }
-                    totalReviews++;
-                    */
-                    //Console.WriteLine($"- {userName}: {userReview} (Positive: {sentimentPrediction.Prediction})");
                     Console.WriteLine($"- {userName}: {userReview}");
+                    Console.MarkupLine($"{style.emoji} [{style.color}]\"\" ({result.Probability:P00})[/] ");
+                    Console.WriteLine();
+                    Console.WriteLine();
                 }
-                /*
-                float positivePercentage = (float)positiveReviews / totalReviews * 100;
-                float negativePercentage = (float)negativeReviews / totalReviews * 100;
-
-                Console.WriteLine($"Positive Reviews: {positivePercentage}%");
-                Console.WriteLine($"Negative Reviews: {negativePercentage}%");
-                */
             }
         }
     }
