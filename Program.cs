@@ -14,6 +14,7 @@ using Microsoft.ML;
 using Microsoft.ML.Data;
 using Spectre.Console;
 using Console = Spectre.Console.AnsiConsole;
+using System.Reactive.Concurrency;
 
 namespace Yelp_restorani
 {
@@ -65,8 +66,9 @@ namespace Yelp_restorani
         {
             return subject.Subscribe(observer);
         }
-        public async void GetBusinesses(string location)
+        public async void GetBusinesses(string location, IScheduler scheduler)
         {
+            #region ML.NET Training
             // ML model training
             var ctx = new MLContext();
 
@@ -118,47 +120,59 @@ namespace Yelp_restorani
 
             // load from disk
             ctx.Model.Load("model.zip", out var schema);
+            #endregion
 
-            string apiKey = "wIiAX8kQc7QKCa0sUC0h-SaSnw-TqCHfu3dVQiG4tVvLzlGcloY5bPb_X5KZ98_2KLAB9gRcw1rlUVCFMrGo8u2CQc6sX3Iu6Vv0TYUZaIVZueVQPu3qVSISl_GOZHYx"; 
-            string apiUrl = $"https://api.yelp.com/v3/businesses/search?location={location}&categories=restaurants";
-            using HttpClient client = new HttpClient();
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-
-            HttpResponseMessage response = await client.GetAsync(apiUrl);
-            string content = await response.Content.ReadAsStringAsync();
-
-            JObject jsonResponse = JObject.Parse(content);
-            JArray businesses = (JArray)jsonResponse["businesses"];
-
-            foreach (JObject business in businesses)
+            await Observable.Start(async () =>
             {
-                string businessId = business["id"].ToString();
-                string businessName = business["name"].ToString();
-                Console.WriteLine($"{businessName} (ID: {businessId})");
-
-                HttpResponseMessage reviewResponse = await client.GetAsync($"https://api.yelp.com/v3/businesses/{businessId}/reviews");
-                string reviewContent = await reviewResponse.Content.ReadAsStringAsync();
-
-                JObject reviewJsonResponse = JObject.Parse(reviewContent);
-                JArray reviews = (JArray)reviewJsonResponse["reviews"];
-
-                foreach (JObject review in reviews)
+                try
                 {
-                    string userName = review["user"]["name"].ToString();
-                    string userReview = review["text"].ToString();
+                    string apiKey = "wIiAX8kQc7QKCa0sUC0h-SaSnw-TqCHfu3dVQiG4tVvLzlGcloY5bPb_X5KZ98_2KLAB9gRcw1rlUVCFMrGo8u2CQc6sX3Iu6Vv0TYUZaIVZueVQPu3qVSISl_GOZHYx";
+                    string apiUrl = $"https://api.yelp.com/v3/businesses/search?location={location}&categories=restaurants";
+                    using HttpClient client = new HttpClient();
+                    client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
 
-                    var engine = ctx.Model.CreatePredictionEngine<SentimentData, SentimentPrediction>(model);
+                    HttpResponseMessage response = await client.GetAsync(apiUrl);
+                    string content = await response.Content.ReadAsStringAsync();
 
-                    var input = new SentimentData { Text = userReview };
-                    var result = engine.Predict(input);
-                    var style = result.Prediction ? (color: "green", emoji: "👍") : (color: "red", emoji: "👎");
+                    JObject jsonResponse = JObject.Parse(content);
+                    JArray businesses = (JArray)jsonResponse["businesses"]!;
 
-                    Console.WriteLine($"- {userName}: {userReview}");
-                    Console.MarkupLine($"{style.emoji} [{style.color}]\"\" ({result.Probability:P00})[/] ");
-                    Console.WriteLine();
-                    Console.WriteLine();
+                    foreach (JObject business in businesses)
+                    {
+                        string businessId = business["id"]!.ToString();
+                        string businessName = business["name"]!.ToString();
+                        Console.WriteLine($"{businessName} (ID: {businessId})");
+
+                        HttpResponseMessage reviewResponse = await client.GetAsync($"https://api.yelp.com/v3/businesses/{businessId}/reviews");
+                        string reviewContent = await reviewResponse.Content.ReadAsStringAsync();
+
+                        JObject reviewJsonResponse = JObject.Parse(reviewContent);
+                        JArray reviews = (JArray)reviewJsonResponse["reviews"]!;
+
+                        foreach (JObject review in reviews)
+                        {
+                            string userName = review["user"]!["name"]!.ToString();
+                            string userReview = review["text"]!.ToString();
+
+                            var engine = ctx.Model.CreatePredictionEngine<SentimentData, SentimentPrediction>(model);
+
+                            var input = new SentimentData { Text = userReview };
+                            var result = engine.Predict(input);
+                            var style = result.Prediction ? (color: "green", emoji: "👍") : (color: "red", emoji: "👎");
+
+                            Console.WriteLine($"- {userName}: {userReview}");
+                            Console.MarkupLine($"{style.emoji} [{style.color}]\"\" ({result.Probability:P00})[/] ");
+                            Console.WriteLine();
+                            Console.WriteLine();
+                        }
+                    }
                 }
-            }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+            },scheduler);
+
         }
     }
     internal class Program
@@ -181,7 +195,9 @@ namespace Yelp_restorani
             Console.WriteLine("Enter your wanted location:");
             location = System.Console.ReadLine()!;
 
-            businessObservable.GetBusinesses(location);
+            IScheduler scheduler = NewThreadScheduler.Default;
+
+            businessObservable.GetBusinesses(location,scheduler);
             System.Console.ReadLine();
 
             subscription1.Dispose();
